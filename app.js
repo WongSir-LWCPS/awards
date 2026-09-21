@@ -1971,12 +1971,25 @@ function admin2Options(selected){
 // readAwardsFromForm 的對應說明：省得表單儲存時還要判斷「這個欄位是隱藏所以要忽略」，
 // 直接用 querySelector 找不到元素自然就代表「這裡沒有這個欄位」）。允許同一個獎項底下
 // 新增多筆（例如多位老師共同得獎），沿用既有的多筆得獎人機制，不需要另外設計。
+// 「教師獎項」得獎人下拉選單的選項：跟 subjectOptions／admin2Options 一樣
+// 做防呆——如果這一列目前的值不在 STATE.teachers 名單裡（例如這位老師後來
+// 從設定頁的教師名單移除了，但舊記錄還留著這個名字；或者是舊版自由輸入
+// 遺留下來、不在名單裡的名字），仍然把這個值加進下拉選單並選中它，不會在
+// 使用者沒有察覺的情況下把原本的名字換成清單第一位老師。
+function teacherRecipientOptions(selected){
+  var opts = (STATE.teachers || []).slice();
+  if (selected && opts.indexOf(selected) === -1) opts.push(selected);
+  return '<option value=""' + (selected?'':' selected') + '>（請選擇老師）</option>' +
+    opts.map(function(t){
+      return '<option value="' + escAttr(t) + '"' + (t===selected?' selected':'') + '>' + esc(t) + '</option>';
+    }).join('');
+}
 function recipientRowHTML(rp, teacherMode){
   rp = rp || { class:'', no:'', name:'' };
   if (teacherMode){
     return (
       '<div class="recipient-row recipient-row-teacher" style="display:flex;gap:8px;align-items:center">' +
-        '<input type="text" class="rec-name" placeholder="獲獎老師姓名" value="' + escAttr(rp.name) + '" aria-label="獲獎老師姓名" style="flex:1 1 auto">' +
+        '<select class="rec-name" aria-label="獲獎老師姓名" style="flex:1 1 auto">' + teacherRecipientOptions(rp.name) + '</select>' +
         '<button type="button" class="rm-btn" data-action="remove-recipient-row" title="移除">✕</button>' +
       '</div>'
     );
