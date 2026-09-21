@@ -2224,12 +2224,12 @@ function awardBlockHTML(award, recSeq){
           '<input type="text" class="award-item" placeholder="例如：高小組60米賽跑" value="' + escAttr(award.item || '') + '"></div>' +
         '<div class="field"><label class="field-required">獎項名稱' + hintIcon('只需填名次/名銜本身，例如「冠軍」。') + '</label>' +
           '<input type="text" class="award-name" placeholder="例如：冠軍" value="' + escAttr(award.name) + '"></div>' +
-        '<div class="field" style="flex:0 0 auto;min-width:130px"><label>類型' + hintIcon('「團體」表示以下學生同隊共同獲得這個獎項；「個人」表示每位學生各自獲得（同一獎項名稱可有多位得獎者）；「學校獎項」的得獎人固定是校方本身，不需要輸入名稱；「教師獎項」用於得獎人是老師而非學生的情況，填寫老師姓名（可新增多筆）。') + '</label>' +
+        '<div class="field" style="flex:0 0 140px"><label>類型' + hintIcon('「團體」表示以下學生同隊共同獲得這個獎項；「個人」表示每位學生各自獲得（同一獎項名稱可有多位得獎者）；「學校」的得獎人固定是校方本身，不需要輸入名稱；「教師」用於得獎人是老師而非學生的情況，填寫老師姓名（可新增多筆）。') + '</label>' +
           '<select class="award-type">' +
             '<option value="individual"' + (type==='individual'?' selected':'') + '>個人</option>' +
             '<option value="team"' + (type==='team'?' selected':'') + '>團體</option>' +
-            '<option value="school"' + (type==='school'?' selected':'') + '>學校獎項</option>' +
-            '<option value="teacher"' + (type==='teacher'?' selected':'') + '>教師獎項</option>' +
+            '<option value="school"' + (type==='school'?' selected':'') + '>學校</option>' +
+            '<option value="teacher"' + (type==='teacher'?' selected':'') + '>教師</option>' +
           '</select></div>' +
         '<button type="button" class="rm-award-btn" data-action="remove-award-block" title="移除整個獎項">刪除獎項</button>' +
       '</div>' +
