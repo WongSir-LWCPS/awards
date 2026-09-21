@@ -467,7 +467,10 @@ return STATE;
 var ui = {
   view: (VALID_VIEWS[safeSessionGet('awardsView')] ? safeSessionGet('awardsView') : 'add'),
   adminMode: safeSessionGet('awardsAdminMode') === '1',
-  selectedYear: STATE.meta.currentSchoolYear,
+  // 2026-09-21 Firebase 版本：STATE 這時候還是 null（要等 Firebase 資料回來才有），
+  // 不能在這裡讀 STATE.meta，先留空字串，等 maybeStartApp() 拿到真正資料時
+  // 會設定成正確的值（見檔案最後 Firebase bootstrap 段落）。
+  selectedYear: '',
   editingId: null,
   listSearch: '',
   listSubject: 'all',
