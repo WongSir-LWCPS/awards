@@ -65,8 +65,12 @@
 
   .year-select{
     background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff;
-    border-radius:var(--radius-s); padding:6px 8px; font-size:12.5px; font-weight:600;
-    width:auto; flex:0 0 auto;
+    border-radius:var(--radius-s); padding:6px 24px 6px 8px; font-size:12.5px; font-weight:600;
+    width:auto; flex:0 0 auto; height:auto; line-height:normal;
+    /* 這個下拉在深藍色的頁首上，下面共用的 select 箭頭（灰色）看不清楚，
+       這裡另外畫一支白色箭頭。 */
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+    background-repeat:no-repeat; background-position:right 6px center;
   }
   .year-select option{ color:#1A2330; }
 
@@ -114,12 +118,21 @@
   .field-required::after{ content:" *"; color:var(--color-bad); }
   input[type=text],input[type=date],input[type=search],input[type=password],select,textarea{
     background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-s);
-    padding:9px 10px; color:var(--color-text); width:100%;
+    padding:9px 10px; color:var(--color-text); width:100%; height:40px; line-height:20px;
   }
+  /* 瀏覽器對 <select> 的原生外觀（下拉箭頭那塊）常會多佔一些高度，即使跟
+     旁邊的 <input type=text> 用同一份 padding/border 也不一定等高；這裡
+     關掉原生外觀、換成自己畫的箭頭，並用上面同一個 height，確保「類型」
+     這種下拉選單跟文字輸入框永遠一樣高。 */
+  select{
+    -webkit-appearance:none; -moz-appearance:none; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235C6773' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+    background-repeat:no-repeat; background-position:right 10px center; padding-right:30px;
+  }
+  textarea{ height:auto; line-height:1.5; resize:vertical; min-height:56px; }
   input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{
     outline:2px solid var(--color-info); outline-offset:1px;
   }
-  textarea{ resize:vertical; min-height:56px; }
 
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:6px;

@@ -1945,6 +1945,21 @@ function yearOptionsFor(selected){
   }).join('');
 }
 
+// 「學段 / 優點備註」欄位（2026-09-21 改為下拉選單，固定三個學段可選）：
+// 空白（未選擇）永遠是第一個選項；跟 subjectOptions 一樣做防呆——如果這筆
+// 記錄目前存的值不是這三個學段之一（例如舊資料曾經是自由輸入的文字），
+// 仍然要把這個值加進下拉選單並選中它，否則儲存表單時會在使用者沒有察覺的
+// 情況下，把原本的舊文字靜默改掉。
+var ADMIN2_TERM_OPTIONS = ['第一學段', '第二學段', '第三學段'];
+function admin2Options(selected){
+  var opts = ADMIN2_TERM_OPTIONS.slice();
+  if (selected && opts.indexOf(selected) === -1) opts.push(selected);
+  return '<option value=""' + (selected?'':' selected') + '>（未選擇）</option>' +
+    opts.map(function(o){
+      return '<option value="' + escAttr(o) + '"' + (o===selected?' selected':'') + '>' + esc(o) + '</option>';
+    }).join('');
+}
+
 // teacherMode（2026-09-09 新增「學校/教師獎項」時稱為 schoolMode，2026-09-19
 // 第十一次更新把「學校/教師獎項」拆成獨立的「學校獎項」與「教師獎項」兩個類型後
 // 改名並收窄成只代表「教師獎項」——「學校獎項」的得獎人固定是校方本身、完全不需要
@@ -2224,7 +2239,7 @@ function awardBlockHTML(award, recSeq){
           '<input type="text" class="award-item" placeholder="例如：高小組60米賽跑" value="' + escAttr(award.item || '') + '"></div>' +
         '<div class="field"><label class="field-required">獎項名稱' + hintIcon('只需填名次/名銜本身，例如「冠軍」。') + '</label>' +
           '<input type="text" class="award-name" placeholder="例如：冠軍" value="' + escAttr(award.name) + '"></div>' +
-        '<div class="field" style="flex:0 0 140px"><label>類型' + hintIcon('「團體」表示以下學生同隊共同獲得這個獎項；「個人」表示每位學生各自獲得（同一獎項名稱可有多位得獎者）；「學校」的得獎人固定是校方本身，不需要輸入名稱；「教師」用於得獎人是老師而非學生的情況，填寫老師姓名（可新增多筆）。') + '</label>' +
+        '<div class="field" style="flex:0 0 auto;min-width:130px"><label>類型' + hintIcon('「團體」表示以下學生同隊共同獲得這個獎項；「個人」表示每位學生各自獲得（同一獎項名稱可有多位得獎者）；「學校」的得獎人固定是校方本身，不需要輸入名稱；「教師」用於得獎人是老師而非學生的情況，填寫老師姓名（可新增多筆）。') + '</label>' +
           '<select class="award-type">' +
             '<option value="individual"' + (type==='individual'?' selected':'') + '>個人</option>' +
             '<option value="team"' + (type==='team'?' selected':'') + '>團體</option>' +
@@ -2279,7 +2294,7 @@ function renderAddView(){
           '<div class="field"><label for="f-admin1">校務處理備註</label>' +
             '<input type="text" id="f-admin1" value="' + escAttr(rec ? rec.admin1 : '') + '"></div>' +
           '<div class="field"><label for="f-admin2">學段 / 優點備註</label>' +
-            '<input type="text" id="f-admin2" value="' + escAttr(rec ? rec.admin2 : '') + '"></div>' +
+            '<select id="f-admin2">' + admin2Options(rec ? rec.admin2 : '') + '</select></div>' +
         '</div>' +
         '<label class="check-inline"><input type="checkbox" id="f-needs-review" ' + (rec && rec.needsReview ? 'checked' : '') + '> 標記為待確認</label>' +
         (rec && rec.reviewNote ? '<div class="banner banner-warn">' + esc(rec.reviewNote) + '</div>' : '') +
