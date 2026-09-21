@@ -621,6 +621,77 @@ function attachStudentNos(awards, year){
   });
 }
 
+// 2026-09-21 新增（同日再改為班別＋班號＋姓名三項一起核對，回應「應該以
+// 班別＋班號＋姓名的方式作核對」的要求——原本只核對班別＋姓名，同班同名
+// 兩位學生的情況分不出來）：新增／編輯記錄按「儲存記錄」時，檢查手動輸入
+// 的學生資料（個人／團體獎項的得獎人）是否能在該學年的學生名單裡找到
+// 對應的學生，抓出常見的手民之誤（姓名打錯字、班別或班號跟名單對不上、
+// 同名學生一堆但沒填班號分不出是哪一位）。這裡的「班號」是 rec-no 欄位
+// （表單上寫「學號」，其實是班別內的座號，跟學生名單 roster row 的 `no`
+// 欄位是同一個概念——school-wide 的永久學生編號 studentNo 是另一件事，
+// 見上方 lookupStudentNo 的說明，這裡不牽涉）。
+//
+// 三個欄位裡，姓名一定要有（沒填姓名的列本來就會被 readAwardsFromForm
+// 整列忽略，不會走到這裡）；班別／班號則是「有填就核對，沒填就不強求」
+// ——不少老師習慣只填姓名不填班號，這種情況只要名單裡剛好只有一位同名
+// 學生就視為沒問題，多位同名才會因為缺班號而判斷不出來、跳出提醒。
+//
+// 刻意只是「儲存前提醒、讓老師確認要不要照樣儲存」，不是直接擋下不給存
+// ——轉校生等名單還沒更新的情況很常見，系統不能替老師判斷這筆資料到底
+// 是打錯還是名單沒更新，只能列出來讓人自己判斷（與系統一貫「寧缺勿猜」
+// 的保守慣例一致，跟「資料品質檢查」小節的精神相同，差別只在於這裡是
+// 儲存當下就提醒，不用等到之後去設定頁才發現）。
+function findRosterIssues(awards, year){
+  var issues = [];
+  var roster = studentRosterForYear(year);
+  awards.forEach(function(a){
+    if (a.type === 'school' || a.type === 'teacher') return;
+    a.recipients.forEach(function(rp){
+      var name = (rp.name || '').trim();
+      if (!name) return;
+      var cls = (rp.class || '').trim();
+      var no = (rp.no || '').trim();
+      var byName = roster.filter(function(r){ return r.name.trim() === name; });
+      var reason = '';
+      if (!byName.length){
+        reason = '「' + year + '」學年的學生名單中找不到這個名字';
+      } else {
+        var exact = byName.filter(function(r){
+          return (!cls || (r.class || '').trim() === cls) && (!no || (r.no || '').trim() === no);
+        });
+        if (exact.length !== 1){
+          if (!cls && !no){
+            // 完全沒填班別／班號，唯一的判斷依據就是姓名——多位同名就是
+            // 無法判斷是哪一位。
+            reason = '名單中有 ' + byName.length + ' 位學生同名，未填班別／學號，無法判斷是哪一位';
+          } else {
+            var clsMismatch = cls && !byName.some(function(r){ return (r.class || '').trim() === cls; });
+            var noMismatch = no && !byName.some(function(r){ return (r.no || '').trim() === no; });
+            var parts = [];
+            if (clsMismatch) parts.push('班別「' + cls + '」與名單中「' + name + '」的班別（' + uniqueJoin(byName.map(function(r){ return r.class || '（空白）'; })) + '）不同');
+            if (noMismatch) parts.push('學號「' + no + '」與名單中的學號不同');
+            if (!parts.length){
+              // 個別欄位都對得上名單裡「某一筆」，但兩者合在一起還是找不到
+              // 剛好一筆（例如同班同名兩位、又剛好都沒填學號分不出來）。
+              parts.push('班別、學號都能在名單中找到，但兩者合在一起無法唯一對應到一位「' + name + '」（名單中有 ' + byName.length + ' 位同名）');
+            }
+            reason = parts.join('；');
+          }
+        }
+      }
+      if (reason){
+        issues.push({ awardName: a.name || '（未命名獎項）', name: name, cls: cls, no: no, reason: reason });
+      }
+    });
+  });
+  return issues;
+}
+function uniqueJoin(arr){
+  var seen = {}, out = [];
+  arr.forEach(function(v){ if (!seen[v]){ seen[v] = true; out.push(v); } });
+  return out.join('、');
+}
+
 // Classes with at least one roster entry for `year`, sorted. Backs the
 // "從學生名單選取" recipient picker on the add/edit record form (see
 // rosterPickerHTML/populateRosterPickerClasses below) — lets a teacher pick
@@ -991,6 +1062,31 @@ function commitRecordFromForm(formEl){
   }
   errBox.hidden = true;
 
+  // 必填欄位都過了，接著檢查手動輸入的學生資料能不能在名單裡找到對應的
+  // 學生（見 findRosterIssues 的說明）。這裡不是「錯誤」（不會擋住儲存、
+  // 不會重新叫出這個表單去改），是儲存前的最後一次提醒——彈出確認視窗
+  // 列出可疑的地方，讓老師自己判斷是打錯字要回去修正，還是名單本身還沒
+  // 更新、資料其實沒錯，選「仍要儲存」就會照原本輸入的內容存檔，不會
+  // 自動更動任何欄位。
+  var rosterIssues = findRosterIssues(awards, schoolYear);
+  if (rosterIssues.length){
+    ui.modal = {
+      type: 'roster-mismatch-confirm',
+      issues: rosterIssues,
+      pending: { subject:subject, event_:event_, organizer:organizer, date:date, teacher:teacher, schoolYear:schoolYear, awards:awards }
+    };
+    renderModal();
+    return;
+  }
+
+  finalizeRecordSave(subject, event_, organizer, date, teacher, schoolYear, awards);
+}
+
+// 真正把表單資料寫進 record／STATE 並儲存——commitRecordFromForm 驗證過
+// 必填欄位、且沒有（或使用者已確認忽略）學生資料比對疑慮後呼叫；也是
+// 「仍要儲存」（confirm-save-roster-issues）那個 modal 按鈕的落點，兩條
+// 路徑最後都走到同一份邏輯，避免重複維護兩份幾乎一樣的程式碼。
+function finalizeRecordSave(subject, event_, organizer, date, teacher, schoolYear, awards){
   var record;
   if (ui.editingId){
     record = getRecord(ui.editingId);
@@ -1016,12 +1112,15 @@ function commitRecordFromForm(formEl){
   record.awards = awards;
 
   if (ui.adminMode){
-    var a1 = formEl.querySelector('#f-admin1');
-    var a2 = formEl.querySelector('#f-admin2');
-    var nr = formEl.querySelector('#f-needs-review');
+    var formEl = document.getElementById('add-edit-form');
+    var a1 = formEl ? formEl.querySelector('#f-admin1') : null;
+    var a2 = formEl ? formEl.querySelector('#f-admin2') : null;
+    var nr = formEl ? formEl.querySelector('#f-needs-review') : null;
+    var hk = formEl ? formEl.querySelector('#f-hkwide') : null;
     if (a1) record.admin1 = a1.value.trim();
     if (a2) record.admin2 = a2.value.trim();
     if (nr) record.needsReview = nr.checked;
+    if (hk) record.hkWide = hk.checked;
   }
 
   var wasEditing = !!ui.editingId;
@@ -1711,6 +1810,32 @@ function renderModal(){
     return;
   }
 
+  if (ui.modal.type === 'roster-mismatch-confirm'){
+    var rmIssues = ui.modal.issues;
+    var rmRows = rmIssues.map(function(it){
+      return '<div class="review-item"><div>' +
+        '<div><b>' + esc(it.name) + '</b>' +
+          (it.cls ? ' <span class="badge badge-muted">' + esc(it.cls) + '</span>' : '') +
+          (it.no ? ' <span class="badge badge-muted">學號 ' + esc(it.no) + '</span>' : '') +
+          ' · ' + esc(it.awardName) + '</div>' +
+        '<div class="dq-line">' + esc(it.reason) + '</div>' +
+      '</div></div>';
+    }).join('');
+    container.innerHTML =
+      '<div class="modal-backdrop" data-action="modal-backdrop">' +
+        '<div class="modal modal-wide">' +
+          '<h3>學生資料請再確認</h3>' +
+          '<div class="banner banner-warn" style="margin:10px 0">以下 ' + rmIssues.length + ' 筆得獎人資料，在學生名單中找不到完全對得上的學生，可能是姓名或班別打錯了，也可能是名單還沒更新（例如轉校生）。請先確認是否正確，如果沒有問題可以直接「仍要儲存」。</div>' +
+          '<div class="stack" style="gap:8px">' + rmRows + '</div>' +
+          '<div class="row" style="justify-content:flex-end;margin-top:14px">' +
+            '<button class="btn" type="button" data-action="close-modal">返回修改</button>' +
+            '<button class="btn btn-primary" type="button" data-action="confirm-save-roster-issues">仍要儲存</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    return;
+  }
+
   if (ui.modal.type === 'clear-year'){
     var cyYear = ui.modal.year;
     container.innerHTML =
@@ -2310,6 +2435,7 @@ function renderAddView(){
             '<select id="f-admin2">' + admin2Options(rec ? rec.admin2 : '') + '</select></div>' +
         '</div>' +
         '<label class="check-inline"><input type="checkbox" id="f-needs-review" ' + (rec && rec.needsReview ? 'checked' : '') + '> 標記為待確認</label>' +
+        '<label class="check-inline"><input type="checkbox" id="f-hkwide" ' + (rec && rec.hkWide ? 'checked' : '') + '> 全港性比賽' + hintIcon('標記這場比賽／活動屬於全港性質（例如校際、全港性的比賽或活動），方便日後在統計頁單獨查看全港性比賽的獲獎情況。') + '</label>' +
         (rec && rec.reviewNote ? '<div class="banner banner-warn">' + esc(rec.reviewNote) + '</div>' : '') +
         (rec && rec.source === 'import' ? '<div class="hint">此記錄由舊版 Excel 匯入' + (rec.sourceRow ? '（原始第 ' + rec.sourceRow + ' 列）' : '') + '。</div>' : '') +
       '</div>';
@@ -2835,6 +2961,7 @@ function buildRecordRow(rec){
       '<td class="cell-muted">' + esc(displayDate(rec.date)) + '</td>' +
       '<td class="cell-event">' + (typeof rec.seq === 'number' ? '<span class="cell-muted">' + formatRecordSeq(rec.seq) + '</span> ' : '') + esc(rec.event) +
         (rec.needsReview ? ' <span class="badge badge-warn">待確認</span>' : '') +
+        (rec.hkWide ? ' <span class="badge badge-accent">全港性</span>' : '') +
         '<div class="event-sub">' + esc(awardNames) + (rec.organizer ? ' · ' + esc(rec.organizer) : '') + '</div>' +
       '</td>' +
       '<td>' + awardCount(rec) + ' 個獎項 · ' + count + ' 人</td>' +
@@ -3267,6 +3394,21 @@ function renderStatsView(){
   var typeAwardEntries = [['個人', stats.perTypeAwards.individual], ['團體', stats.perTypeAwards.team], ['學校', stats.perTypeAwards.school], ['教師', stats.perTypeAwards.teacher]];
   var typeRecipientEntries = [['個人', stats.perTypeRecipients.individual], ['團體', stats.perTypeRecipients.team], ['學校', stats.perTypeRecipients.school], ['教師', stats.perTypeRecipients.teacher]];
 
+  // 全港性比賽統計（2026-09-21 新增，回應「統計中亦應顯示全港性比賽統計」
+  // 的要求）——只計算 rec.hkWide（新增／編輯記錄的管理員欄位那個「全港性
+  // 比賽」勾選框，見 finalizeRecordSave）為 true 的記錄；直接把這個子集
+  // 再丟一次 computeStats，就能重用同一套「按科目／按學生」的統計邏輯，
+  // 不用另外寫一份。
+  var hkWideRecords = records.filter(function(r){ return r.hkWide; });
+  var hkStats = computeStats(hkWideRecords);
+  var hkPerStudentEntries = sortedEntries(
+    Object.keys(hkStats.perStudent).reduce(function(acc,k){ acc[k]=hkStats.perStudent[k].count; return acc; },{}), 15
+  ).map(function(pair){
+    var s = hkStats.perStudent[pair[0]];
+    return [s.name + '（' + s.cls + '）', pair[1]];
+  });
+  var hkPerSubjectEntries = sortedEntries(hkStats.perSubjectRecipients);
+
   return (
     '<div class="stack">' +
       '<div class="grid-3">' +
@@ -3312,6 +3454,25 @@ function renderStatsView(){
         statSectionHead('老師負責活動數（頭 12 位）', 'teacher-activity', true) +
         renderBarList(perTeacherEntries) +
       '</div>' +
+
+      '<div class="section-title" style="margin-top:4px">全港性比賽統計' + hintIcon('只計算新增／編輯記錄的管理員欄位裡勾選「全港性比賽」的活動記錄，方便另外檢視全港性比賽（相對於校內、校際等其他級別）的獲獎情況。') + '</div>' +
+      '<div class="grid-3">' +
+        '<div class="card stat-card"><div class="stat-num">' + hkWideRecords.length + '</div><div class="stat-label">全港性比賽數</div></div>' +
+        '<div class="card stat-card"><div class="stat-num">' + totalAwardCount(hkWideRecords) + '</div><div class="stat-label">全港性比賽獎項數</div></div>' +
+        '<div class="card stat-card"><div class="stat-num">' + totalRecipientCount(hkWideRecords) + '</div><div class="stat-label">全港性比賽獲獎人次</div></div>' +
+      '</div>' +
+      (hkWideRecords.length
+        ? '<div class="grid-2">' +
+            '<div class="card card-pad">' +
+              statSectionHead('全港性比賽學生獲獎排行（頭 15 位）', 'hkwide-student-rank', true) +
+              renderBarList(hkPerStudentEntries) +
+            '</div>' +
+            '<div class="card card-pad">' +
+              statSectionHead('全港性比賽各科目獲獎人次', 'hkwide-subject-recipients') +
+              renderBarList(hkPerSubjectEntries) +
+            '</div>' +
+          '</div>'
+        : '<div class="cell-muted">目前這個學年還沒有標記為「全港性比賽」的記錄——可在新增／編輯記錄的管理員欄位中勾選。</div>') +
 
       (reviewCount ? '<div class="banner banner-warn">目前有 ' + reviewCount + ' 項記錄標記為「待確認」，前往「設定與匯出」查看清單。</div>' : '') +
     '</div>'
@@ -3669,7 +3830,7 @@ function exportCSV(){
   // 一眼看出哪幾行其實是同一個獎項（例如一個團體獎有多位得獎學生）；比賽編號則能把
   // 同一場比賽底下所有獎項/學生行群組起來。兩者都是穩定不變的整數，取代舊版只有內部
   // 用途、對人不友善的活動編號（rec.id）欄位。
-  var header = ['學年','科目','比賽編號','活動/比賽名稱','主辦機構','比賽日期','獎項編號','項目','獎項名稱','獎項類型','班別','學號','學生姓名','負責老師','校務處理備註','學段/優點備註','待確認'];
+  var header = ['學年','科目','比賽編號','活動/比賽名稱','主辦機構','比賽日期','獎項編號','項目','獎項名稱','獎項類型','班別','學號','學生姓名','負責老師','校務處理備註','學段/優點備註','待確認','全港性比賽'];
   var rows = [header];
   recordsForYear(ui.selectedYear).forEach(function(rec){
     (rec.awards||[]).forEach(function(a){
@@ -3677,7 +3838,7 @@ function exportCSV(){
         rows.push([
           rec.schoolYear, rec.subject, formatRecordSeq(rec.seq), rec.event, rec.organizer,
           rec.date, formatAwardSeq(a.seq, rec.seq), a.item || '', a.name, (a.type === 'team' ? '團體' : (a.type === 'school' ? '學校' : (a.type === 'teacher' ? '教師' : '個人'))), rp.class, rp.no || '', rp.name, rec.teacher,
-          rec.admin1 || '', rec.admin2 || '', rec.needsReview ? '是' : ''
+          rec.admin1 || '', rec.admin2 || '', rec.needsReview ? '是' : '', rec.hkWide ? '是' : ''
         ]);
       });
     });
@@ -3725,6 +3886,18 @@ function exportStatByKey(statKey){
     'teacher-activity': {
       label: '老師負責活動數', header: ['老師', '活動數'],
       entries: sortedEntries(stats.perTeacher)
+    },
+    'hkwide-student-rank': {
+      label: '全港性比賽學生獲獎排行', header: ['學生', '班別', '獲獎人次'],
+      entries: (function(){
+        var hkStats2 = computeStats(records.filter(function(r){ return r.hkWide; }));
+        return sortedEntries(Object.keys(hkStats2.perStudent).reduce(function(acc,k){ acc[k] = hkStats2.perStudent[k].count; return acc; }, {}))
+          .map(function(pair){ var s = hkStats2.perStudent[pair[0]]; return [s.name, s.cls, pair[1]]; });
+      })()
+    },
+    'hkwide-subject-recipients': {
+      label: '全港性比賽各科目獲獎人次', header: ['科目', '獲獎人次'],
+      entries: sortedEntries(computeStats(records.filter(function(r){ return r.hkWide; })).perSubjectRecipients)
     }
   };
   var def = defs[statKey];
@@ -4015,6 +4188,14 @@ root.addEventListener('click', function(e){
     }
     ui.modal = null;
     renderModal();
+    return;
+  }
+  if (action === 'confirm-save-roster-issues'){
+    var rmPending = ui.modal && ui.modal.type === 'roster-mismatch-confirm' ? ui.modal.pending : null;
+    ui.modal = null;
+    renderModal();
+    if (!rmPending) return;
+    finalizeRecordSave(rmPending.subject, rmPending.event_, rmPending.organizer, rmPending.date, rmPending.teacher, rmPending.schoolYear, rmPending.awards);
     return;
   }
   if (action === 'edit-record'){
