@@ -167,10 +167,14 @@ function splitTeacherNames(str){
 }
 
 /* ============================================================
-   資料品質檢查（2026-09-20 新增：把先前每次都要在對話裡手動掃描/比對的
-   資料清理流程，做成設定頁裡可自行重複執行的內建工具，見「資料品質檢查」
-   一節）。四項檢查都是唯讀計算，直接從目前的 STATE 即時算出，不需要另外
-   按「掃描」按鈕、也不需要任何新的持久化欄位。
+   資料品質檢查（2026-09-20 新增，2026-09-21 改為只掃描「目前選定學年」：
+   把先前每次都要在對話裡手動掃描/比對的資料清理流程，做成設定頁裡可自行
+   重複執行的內建工具，見「資料品質檢查」一節）。三項掃描函式都吃一個
+   year 參數，只針對該學年的記錄計算，避免一次列出全部學年、多學年資料
+   混在一起不好看；呼叫端一律傳入 ui.selectedYear（設定頁頂端「學年」
+   下拉選單目前選到的那個學年，跟其他設定頁小節如統計、課外活動名單一致）。
+   都是唯讀計算，直接從目前的 STATE 即時算出，不需要另外按「掃描」按鈕、
+   也不需要任何新的持久化欄位。
    ============================================================ */
 
 // 只給「負責老師合併掃描」使用的較寬鬆拆分：在 splitTeacherNames 既有的
@@ -194,19 +198,19 @@ function splitTeacherLineForScan(line){
   return parts.map(stripTeacherHonorific).filter(Boolean);
 }
 
-// 掃描全部學年的記錄，找出「負責老師」欄位裡仍是「單行合併多位老師」（而非
-// 一行一位老師的既定格式）的可疑記錄：該行本身不等於教師名單裡任何一個完整
-// 姓名，但依分隔符號拆開、去除稱謂後綴後，拆出的片段 100% 都能在教師名單裡
-// 找到對應項目，才視為高信心度的可疑合併行（與人工核對過的門檻一致，避免
-// 誤判單純的長姓名或非教師相關文字）。回傳陣列，每筆
+// 掃描指定學年裡，「負責老師」欄位仍是「單行合併多位老師」（而非一行一位
+// 老師的既定格式）的可疑記錄：該行本身不等於教師名單裡任何一個完整姓名，
+// 但依分隔符號拆開、去除稱謂後綴後，拆出的片段 100% 都能在教師名單裡找到
+// 對應項目，才視為高信心度的可疑合併行（與人工核對過的門檻一致，避免誤判
+// 單純的長姓名或非教師相關文字）。回傳陣列，每筆
 // { id, event, schoolYear, original, suggested }——suggested 是把可疑行
 // 展開成多行、其餘本來就正確的行原樣保留後的完整建議值；沒有任何一行需要
 // 展開的記錄不會出現在結果裡。
-function scanTeacherMerges(){
+function scanTeacherMerges(year){
   var teacherSet = {};
   (STATE.teachers || []).forEach(function(t){ teacherSet[t] = true; });
   var out = [];
-  STATE.records.forEach(function(rec){
+  recordsForYear(year).forEach(function(rec){
     var raw = rec.teacher || '';
     if (!raw.trim()) return;
     var lines = raw.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
@@ -229,14 +233,14 @@ function scanTeacherMerges(){
   return out;
 }
 
-// 掃描「比賽日期」欄位格式異常（非空白、但不是標準 YYYY-MM-DD）的記錄。只有
-// 能明確辨識成「YYYY/M/D」或「YYYY.M.D」這類無歧義寫法時，才算出建議的標準
-// 化值（suggested）；其餘格式（中文日期、缺年份、順序不明等）系統無法安全
-// 猜測，suggested 留空字串，只能交由管理員自行判斷、按「前往編輯」手動修正
-// ——沿用系統一貫「寧缺勿猜」的保守慣例。
-function scanDateFormats(){
+// 掃描指定學年裡「比賽日期」欄位格式異常（非空白、但不是標準 YYYY-MM-DD）
+// 的記錄。只有能明確辨識成「YYYY/M/D」或「YYYY.M.D」這類無歧義寫法時，
+// 才算出建議的標準化值（suggested）；其餘格式（中文日期、缺年份、順序
+// 不明等）系統無法安全猜測，suggested 留空字串，只能交由管理員自行判斷、
+// 按「前往編輯」手動修正——沿用系統一貫「寧缺勿猜」的保守慣例。
+function scanDateFormats(year){
   var out = [];
-  STATE.records.forEach(function(rec){
+  recordsForYear(year).forEach(function(rec){
     var raw = (rec.date || '').trim();
     if (!raw) return;
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return;
@@ -251,15 +255,15 @@ function scanDateFormats(){
   return out;
 }
 
-// 掃描「個人」／「團體」類型獎項裡得獎人姓名本身可疑的項目：姓名空白、
-// 整段疑似英文（無法與中文學生名單比對）、或疑似是團體代稱而非個別學生
-// 姓名（例如「全體男子跳繩隊員」）。純粹是啟發式判斷，只列出來讓管理員
-// 自行複核，系統無法安全地自動猜測正確姓名，因此這項檢查沒有「建議修正」
-// 可套用（不同於上面兩項）。
+// 掃描指定學年裡「個人」／「團體」類型獎項裡得獎人姓名本身可疑的項目：
+// 姓名空白、整段疑似英文（無法與中文學生名單比對）、或疑似是團體代稱而非
+// 個別學生姓名（例如「全體男子跳繩隊員」）。純粹是啟發式判斷，只列出來讓
+// 管理員自行複核，系統無法安全地自動猜測正確姓名，因此這項檢查沒有
+// 「建議修正」可套用（不同於上面兩項）。
 var DQ_GROUP_NAME_HINTS = ['隊員', '全體', '全班', '代表隊'];
-function scanSuspiciousRecipientNames(){
+function scanSuspiciousRecipientNames(year){
   var out = [];
-  STATE.records.forEach(function(rec){
+  recordsForYear(year).forEach(function(rec){
     (rec.awards || []).forEach(function(a){
       if (a.type !== 'individual' && a.type !== 'team') return;
       (a.recipients || []).forEach(function(rp){
@@ -3389,17 +3393,21 @@ function renderClubRosterSection(){
 }
 
 /* ============================================================
-   資料品質檢查卡片（2026-09-20 新增，見上方「資料品質檢查」一節的四個
-   scan 函式）——設定頁裡的內建資料品質工具，涵蓋待確認記錄、負責老師合併
-   掃描、比賽日期格式異常、得獎人姓名可疑四項檢查。
+   資料品質檢查卡片（2026-09-20 新增，2026-09-21 改為只掃描目前選定學年，
+   見上方「資料品質檢查」一節的三個 scan 函式）——設定頁裡的內建資料品質
+   工具，涵蓋待確認記錄、負責老師合併掃描、比賽日期格式異常、得獎人姓名
+   可疑四項檢查，四項都只看 ui.selectedYear（設定頁頂端「學年」下拉選單
+   目前選到的那個學年）這一個學年的記錄，切換學年後（year-select 觸發
+   render()）這裡也會跟著重新計算、只顯示該學年的異常記錄。
    ============================================================ */
 
 function renderDataQualitySection(){
-  var reviewRecs = STATE.records.filter(function(r){ return r.needsReview; });
-  var teacherFixes = scanTeacherMerges();
-  var dateIssues = scanDateFormats();
+  var year = ui.selectedYear;
+  var reviewRecs = recordsForYear(year).filter(function(r){ return r.needsReview; });
+  var teacherFixes = scanTeacherMerges(year);
+  var dateIssues = scanDateFormats(year);
   var dateFixable = dateIssues.filter(function(d){ return d.suggested; });
-  var nameIssues = scanSuspiciousRecipientNames();
+  var nameIssues = scanSuspiciousRecipientNames(year);
 
   var reviewHtml = reviewRecs.length
     ? reviewRecs.map(function(r){
@@ -3467,7 +3475,7 @@ function renderDataQualitySection(){
 
   return (
     '<div class="card card-pad stack">' +
-      '<div class="section-title">資料品質檢查' + hintIcon('自動掃描全部學年的記錄，列出幾類常見的資料問題，方便定期檢視，不用每次都手動逐筆檢查、也不用回來對話裡請人掃描。「負責老師合併成一行」與「比賽日期格式異常」若能安全判斷出正確答案，會附上建議修正，勾選要套用的項目後按「套用勾選的建議修正」即可批次寫入；其餘（待確認記錄、得獎人姓名可疑）需要人工判斷正確答案，系統不猜測，只列出清單並附「前往編輯」按鈕方便直接跳過去手動修正。') + '</div>' +
+      '<div class="section-title">資料品質檢查（' + esc(year) + '）' + hintIcon('自動掃描「' + year + '」這個學年的記錄，列出幾類常見的資料問題，方便定期檢視，不用每次都手動逐筆檢查、也不用回來對話裡請人掃描；只看目前設定頁頂端選定的學年，切換學年選單就會換成掃描該學年。「負責老師合併成一行」與「比賽日期格式異常」若能安全判斷出正確答案，會附上建議修正，勾選要套用的項目後按「套用勾選的建議修正」即可批次寫入；其餘（待確認記錄、得獎人姓名可疑）需要人工判斷正確答案，系統不猜測，只列出清單並附「前往編輯」按鈕方便直接跳過去手動修正。') + '</div>' +
 
       '<div class="stack" style="gap:10px">' +
         '<div class="section-title" style="margin:0">待確認記錄（' + reviewRecs.length + '）</div>' +
@@ -4022,7 +4030,7 @@ root.addEventListener('click', function(e){
     var checkedTeacherIds = {};
     root.querySelectorAll('.dq-teacher-check:checked').forEach(function(cb){ checkedTeacherIds[cb.dataset.id] = true; });
     var teacherFixCount = 0;
-    scanTeacherMerges().forEach(function(f){
+    scanTeacherMerges(ui.selectedYear).forEach(function(f){
       if (!checkedTeacherIds[f.id]) return;
       var rec = getRecord(f.id);
       if (!rec || rec.teacher !== f.original) return; // 頁面渲染後資料若已被別處改動，保守略過，不覆蓋
@@ -4037,7 +4045,7 @@ root.addEventListener('click', function(e){
     var checkedDateIds = {};
     root.querySelectorAll('.dq-date-check:checked').forEach(function(cb){ checkedDateIds[cb.dataset.id] = true; });
     var dateFixCount = 0;
-    scanDateFormats().forEach(function(d){
+    scanDateFormats(ui.selectedYear).forEach(function(d){
       if (!d.suggested || !checkedDateIds[d.id]) return;
       var rec = getRecord(d.id);
       if (!rec || rec.date !== d.original) return; // 同上，保守略過已被別處改動的記錄
