@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>學生獲獎紀錄系統</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+HK:wght@500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="app-root"></div>
+
+<!--
+  Firebase（相容版 SDK，維持全域 firebase.* 命名空間，不需要把 app.js 改寫成
+  ES module）。版本號如果之後 Firebase 官方停止支援、或你想升級，到
+  https://firebase.google.com/docs/web/setup 查目前建議版本，把下面三行的版本號
+  一起換掉即可（三個檔案要用同一個版本號）。
+-->
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore-compat.js"></script>
+
+<!-- 你的 Firebase 專案設定——見 firebase-config.js，記得填入你自己專案的值。 -->
+<script src="firebase-config.js"></script>
+<script src="firebase-init.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

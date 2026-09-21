@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// 樂華天主教小學 學生獲獎紀錄系統 — Firestore 安全規則
+//
+// 兩層權限：
+//   第一層：必須用 @lwcps.edu.hk 的 Google 帳號登入（已驗證 email），才能讀寫任何資料。
+//           這是真正擋外人的一層——沒有登入、或用其他網域的帳號，一律拒絕。
+//   第二層：學生名單／課外活動名單／設定（學年、科目、教師名單）這些「設定頁」相關的
+//           集合，只有「管理員」能寫入。
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSchoolUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@lwcps[.]edu[.]hk$');
+    }
+
+    // 管理員密碼——之後要換密碼，只需要改這一行，重新發佈規則即可，不需要改動任何
+    // 前端程式碼。
+    function ADMIN_PASSWORD() {
+      return '535800';
+    }
+
+    // 「這個人是不是管理員」判斷方式，刻意不把密碼直接放進任何一筆使用者資料（例如
+    // studentRosters/settings 的文件內容）——那樣的話，任何已登入的一般老師都能直接用
+    // 瀏覽器打開 Firestore 讀出那份文件，看到密碼明文，比現在「密碼寫在 app.js 原始碼裡」
+    // 還要更容易被看到。
+    //
+    // 改用一個獨立、誰都讀不到的集合 `_adminSessions/{uid}`：管理員登入時，前端把輸入的
+    // 密碼寫進「自己」的那一份文件（下面 _adminSessions 的規則會核對密碼是否正確，密碼
+    // 不對就直接寫入失敗，等同登入失敗）；寫入成功後，這份文件本身沒有任何人（包括寫入者
+    // 自己）能再讀出來（allow read: if false）——但這裡的 isAdmin() 函式是在「規則」內部
+    // 呼叫 get()，這種規則內部的讀取不受 allow read 限制，所以可以讀到、拿去核對。之後
+    // 管理員的所有寫入操作都只要看這份「有沒有存在、密碼是否仍然正確」的旗標，不需要每次
+    // 操作都重新帶密碼——符合「管理員不用每次寫入都重新輸入密碼」的要求。登出時前端會刪除
+    // 自己這份文件（任何人都可以刪除「自己」的這份，不需要密碼），下次要操作管理員功能就
+    // 得重新輸入密碼。
+    function isAdmin() {
+      return isSchoolUser()
+        && exists(/databases/$(database)/documents/_adminSessions/$(request.auth.uid))
+        && get(/databases/$(database)/documents/_adminSessions/$(request.auth.uid)).data.pass == ADMIN_PASSWORD();
+    }
+
+    // 獲獎記錄：一般已登入使用者（任何 @lwcps.edu.hk 帳號）可以新增/編輯/刪除單筆記錄，
+    // 不需要管理員密碼——對應現行系統「新增/編輯/刪除記錄不用密碼，只要能打開頁面就能用」
+    // 的行為。
+    match /records/{recordId} {
+      allow read: if isSchoolUser();
+      allow create, update, delete: if isSchoolUser();
+    }
+
+    // 學生名單、課外活動名單、設定（學校名稱/目前學年/學年清單/科目清單/教師名單）：
+    // 讀取不用密碼（一般新增記錄表單需要用到這些下拉選單/名單資料），寫入（含刪除）
+    // 需要是管理員，對應現行系統這些功能都在設定頁、需要密碼才能進入的行為。
+    match /studentRosters/{docId} {
+      allow read: if isSchoolUser();
+      allow write: if isAdmin();
+    }
+    match /clubRosters/{docId} {
+      allow read: if isSchoolUser();
+      allow write: if isAdmin();
+    }
+    match /settings/{docId} {
+      allow read: if isSchoolUser();
+      allow write: if isAdmin();
+    }
+
+    // 管理員登入狀態旗標，見上面 isAdmin() 的說明——這裡才是真正核對密碼的地方。
+    match /_adminSessions/{uid} {
+      allow read: if false;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && isSchoolUser() && request.resource.data.pass == ADMIN_PASSWORD();
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

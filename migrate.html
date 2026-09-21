@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>資料搬移工具（一次性）</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@400;600;700&display=swap">
+<style>
+  body{ font-family:"Noto Sans HK","PingFang HK",sans-serif; max-width:560px; margin:60px auto; padding:0 20px; color:#1A2330; line-height:1.6; }
+  h1{ font-size:20px; }
+  .card{ border:1px solid #DFE4EA; border-radius:10px; padding:20px 22px; margin-top:16px; background:#fff; }
+  button{ font:inherit; padding:10px 16px; border-radius:6px; border:1px solid #1D4E89; background:#1D4E89; color:#fff; cursor:pointer; font-weight:600; }
+  button:disabled{ opacity:.5; cursor:not-allowed; }
+  button.secondary{ background:#fff; color:#1D4E89; }
+  input[type=password]{ padding:9px 10px; border:1px solid #DFE4EA; border-radius:6px; width:100%; box-sizing:border-box; margin:8px 0; }
+  .muted{ color:#5C6773; font-size:13px; }
+  .warn{ background:#FBEBD9; border:1px solid #B4650F; color:#B4650F; padding:10px 14px; border-radius:6px; font-size:13.5px; }
+  .log{ white-space:pre-wrap; font-family:monospace; font-size:12.5px; background:#F3F5F8; border-radius:6px; padding:10px 12px; margin-top:12px; max-height:240px; overflow:auto; }
+  .hidden{ display:none; }
+</style>
+</head>
+<body>
+  <h1>學生獲獎紀錄系統 — 資料搬移工具</h1>
+  <p class="muted">
+    這是一次性的工具，把舊版（Claude Artifact）系統裡最後一次匯出的 163 筆獲獎記錄、1228 筆學生名單、
+    777 筆課外活動名單資料，寫進這個 Firebase 專案的 Firestore。可以安全重複執行（不會刪除任何已有
+    資料，只會覆蓋同一個 ID 的舊資料），正式上線、老師開始使用後就不需要再用這個頁面，可以直接刪掉。
+  </p>
+
+  <div class="card" id="step-login">
+    <h3>第一步：登入</h3>
+    <p class="muted">請用 @lwcps.edu.hk 的 Google 帳號登入。</p>
+    <button id="btn-signin">使用 Google 帳號登入</button>
+    <div id="login-status" class="muted" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card hidden" id="step-admin">
+    <h3>第二步：管理員密碼</h3>
+    <p class="muted">學生名單／課外活動名單／設定這幾類資料的寫入需要管理員權限。</p>
+    <input type="password" id="admin-pass" placeholder="管理員密碼" autocomplete="off">
+    <button id="btn-admin-login">確認</button>
+    <div id="admin-status" class="muted" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card hidden" id="step-migrate">
+    <h3>第三步：開始匯入</h3>
+    <div class="warn">按下之後會把 seed-data.json 裡的全部資料寫進 Firestore，數量較多（約 2168 筆文件），
+      需要一點時間，請不要中途關閉分頁。</div>
+    <div style="margin-top:14px"><button id="btn-migrate">開始匯入</button></div>
+    <div class="log hidden" id="log"></div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="firebase-init.js"></script>
+  <script>
+  (function(){
+    var loginStatus = document.getElementById('login-status');
+    var adminStatus = document.getElementById('admin-status');
+    var logBox = document.getElementById('log');
+
+    function log(msg){
+      logBox.classList.remove('hidden');
+      logBox.textContent += msg + '\n';
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    document.getElementById('btn-signin').addEventListener('click', function(){
+      window.fbApi.signIn().catch(function(err){
+        loginStatus.textContent = '登入失敗：' + (err && err.message ? err.message : '未知錯誤');
+      });
+    });
+
+    window.fbApi.onAuthChange(function(user){
+      if (!user){
+        loginStatus.textContent = '尚未登入';
+        document.getElementById('step-admin').classList.add('hidden');
+        document.getElementById('step-migrate').classList.add('hidden');
+        return;
+      }
+      loginStatus.textContent = '已登入：' + user.email;
+      document.getElementById('step-admin').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-admin-login').addEventListener('click', function(){
+      var pass = document.getElementById('admin-pass').value;
+      window.fbApi.adminLogin(pass).then(function(){
+        adminStatus.textContent = '密碼正確，管理員權限已啟用。';
+        document.getElementById('step-migrate').classList.remove('hidden');
+      }).catch(function(){
+        adminStatus.textContent = '密碼錯誤，請再試一次。';
+      });
+    });
+
+    document.getElementById('btn-migrate').addEventListener('click', function(){
+      var btn = document.getElementById('btn-migrate');
+      btn.disabled = true;
+      log('讀取 seed-data.json…');
+      fetch('seed-data.json').then(function(r){
+        if (!r.ok) throw new Error('讀取 seed-data.json 失敗（HTTP ' + r.status + '）');
+        return r.json();
+      }).then(function(seed){
+        log('讀到 ' + seed.records.length + ' 筆記錄、' + seed.studentRosters.length + ' 筆學生名單、' +
+          seed.clubRosters.length + ' 筆課外活動名單，開始寫入 Firestore（分批進行，請稍候）…');
+        var empty = { records: [], studentRosters: [], clubRosters: [], settings: {} };
+        return window.fbApi.commitDiff(empty, seed);
+      }).then(function(){
+        log('完成！資料已經全部寫入 Firestore。');
+        log('現在可以打開 index.html 試用，或直接把這個 migrate.html／seed-data.json 從網站上刪掉（不影響已經寫入的資料）。');
+        btn.textContent = '已完成';
+      }).catch(function(err){
+        log('發生錯誤：' + (err && err.message ? err.message : String(err)));
+        log('如果是權限相關的錯誤，請確認 firestore.rules 已經發佈、且第二步的管理員密碼正確。');
+        btn.disabled = false;
+      });
+    });
+  })();
+  </script>
+</body>
+</html>
