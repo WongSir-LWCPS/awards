@@ -165,17 +165,36 @@
 
   // Firestore 一個 batch 最多 500 個操作，這裡保守切到 400，避免剛好卡在邊界。
   function commitOps(ops){
-    if (!ops.length) return Promise.resolve({ noop: true });
+    // 2026-09-28 新增診斷紀錄（回應「新增/匯入獎項後記錄仍然會消失」持續
+    // 回報，且加了 app.js 那邊讀取端的診斷之後，使用者操作時完全沒有看到
+    // 任何 [awards-sync] 訊息——代表問題很可能出在「寫入」這一步本身，
+    // 從來沒有真的送到 Firestore，而不是寫入成功後又被覆蓋掉）：直接在
+    // 寫入的入口／每個 batch 送出前後都印出訊息，這樣才能確認 commitDiff
+    // 到底有沒有被呼叫、算出了幾個操作、batch.commit() 本身是成功還是
+    // 失敗（連同完整錯誤物件，包含 code／message）。
+    if (!ops.length){
+      console.log('[awards-sync] commitOps：這次沒有任何欄位變動，不需要寫入 Firestore（noop）');
+      return Promise.resolve({ noop: true });
+    }
+    console.log('[awards-sync] commitOps：準備寫入 ' + ops.length + ' 個操作', ops.map(function(op){
+      return (op.type === 'delete' ? 'DELETE ' : 'SET ') + op.ref.path;
+    }));
     var chunks = chunkArray(ops, 400);
     var p = Promise.resolve();
-    chunks.forEach(function(c){
+    chunks.forEach(function(c, chunkIdx){
       p = p.then(function(){
         var batch = db.batch();
         c.forEach(function(op){
           if (op.type === 'set') batch.set(op.ref, op.data);
           else if (op.type === 'delete') batch.delete(op.ref);
         });
-        return batch.commit();
+        return batch.commit().then(function(res){
+          console.log('[awards-sync] commitOps：第 ' + (chunkIdx + 1) + '/' + chunks.length + ' 批（' + c.length + ' 個操作）已成功寫入 Firestore 伺服器');
+          return res;
+        }).catch(function(err){
+          console.error('[awards-sync] commitOps：第 ' + (chunkIdx + 1) + '/' + chunks.length + ' 批寫入失敗！code=' + (err && err.code) + ' message=' + (err && err.message), err);
+          throw err;
+        });
       });
     });
     return p;

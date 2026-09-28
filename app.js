@@ -933,7 +933,12 @@ function stateToMirrorShape(s){
 }
 
 function saveAndPublish(successMsg){
+  // 2026-09-28 新增診斷紀錄（見 firebase-init.js commitOps 上方的說明——
+  // 這是同一輪診斷的另一半，用來確認 saveAndPublish 本身到底有沒有被呼叫、
+  // 有沒有在這個 guard 就提早返回）。
+  console.log('[awards-sync] saveAndPublish 被呼叫：' + (successMsg || '') + '，目前 STATE.records 共 ' + (STATE && STATE.records ? STATE.records.length : '?') + ' 筆');
   if (!window.fbApi || !firestoreMirror){
+    console.warn('[awards-sync] saveAndPublish 提早返回，沒有嘗試寫入 Firestore！window.fbApi 是否存在：' + !!window.fbApi + '，firestoreMirror 是否存在：' + !!firestoreMirror);
     showToast('尚未連接資料庫，變更暫時只存在此頁面（重新整理會遺失）', 4200);
     return;
   }
@@ -961,11 +966,13 @@ function saveAndPublish(successMsg){
     // 實際收到的 Firestore 資料更新——那才是唯一真正該被信任的「目前
     // Firestore 上真正有什麼」的來源，而且這次寫入本身很快就會觸發監聽器
     // 收到回音、自然把 firestoreMirror 更新好，不需要這裡搶著手動覆蓋。
+    console.log('[awards-sync] saveAndPublish 成功：commitDiff 已 resolve');
     ui.saving = false;
     ui.syncOK = true;
     showToast(successMsg || '已儲存');
     render();
   }).catch(function(err){
+    console.error('[awards-sync] saveAndPublish 失敗：commitDiff 被 reject，code=' + (err && err.code) + ' message=' + (err && err.message), err);
     ui.saving = false;
     ui.syncOK = false;
     var code = err && err.code;
