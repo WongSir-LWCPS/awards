@@ -1822,7 +1822,11 @@ function renderShell(){
       '<div><h1>' + esc(viewTitle()) + '</h1><div class="sub">' + esc(viewSub()) + '</div></div>' +
     '</div></div>' +
     '<div class="content" id="view-content">' + renderView() + '</div>' +
-    '<div class="toast-wrap" id="toast-wrap"></div>' +
+    // 2026-09-28：#toast-wrap 已搬到 index.html、變成 #app-root 的兄弟元素，
+    // 不再是 renderShell() 回傳內容的一部分——原因見 index.html 裡對應位置
+    // 的說明（render() 每次都會整段重建這裡回傳的內容，toast 提示如果還放
+    // 在這裡面，會在使用者看到之前就被下一次 render() 砍掉）。這裡刻意保留
+    // 這則註解，避免日後有人以為「toast-wrap 不見了」又把它加回來。
     '<div id="modal-root"></div>'
   );
 }

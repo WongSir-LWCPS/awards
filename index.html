@@ -10,6 +10,25 @@
 </head>
 <body>
 <div id="app-root"></div>
+<!--
+  2026-09-28 修正（回應「新增一個功能，如果有任何資料變更時都彈出提示信息」
+  後，使用者回報「仍然沒有跳出任何提示」）：找到真正原因——toast 提示的容器
+  （#toast-wrap）原本是寫在 app.js 的 renderShell() 回傳字串裡、跟著整個
+  #app-root 一起被 render()（`root.innerHTML = renderShell()`）整段重新產生。
+  showToast() 把提示訊息加進 #toast-wrap 之後，幾乎每次都會緊接著呼叫一次
+  render()（不管是這次存檔本身的 render()，還是幾乎同時傳回來的即時同步回音
+  觸發的 render()）——這個 render() 會把整個 #app-root（含 #toast-wrap）砍掉
+  重建成一個全新、空的 <div id="toast-wrap">，剛剛加進去的提示訊息因此在使用者
+  根本還沒看到之前就被砍掉了。這解釋了為什麼這個系統裡的 toast 提示實際上
+  「從來沒有真的顯示過」——不是這次新增的成功/失敗樣式沒生效，是提示容器
+  本身的生命週期一直有問題，這是相當根本、且一路延續到這次修正之前都存在
+  的既有 bug。修正方式：把 #toast-wrap 搬到這裡，變成 #app-root 的「兄弟」
+  元素，完全獨立在 render() 每次重新產生的範圍之外——這樣不管畫面主體重新
+  渲染幾次，提示訊息都不會被牽連砍掉，只會在自己的計時器（見 app.js
+  showToast() 的 setTimeout）時間到了才消失。app.js 的 renderShell() 也
+  已經同步移除了原本內嵌在裡面的那一份 #toast-wrap 標記，避免重複。
+-->
+<div class="toast-wrap" id="toast-wrap"></div>
 
 <!--
   Firebase（相容版 SDK，維持全域 firebase.* 命名空間，不需要把 app.js 改寫成
