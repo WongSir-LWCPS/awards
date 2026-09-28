@@ -947,6 +947,20 @@ function saveAndPublish(successMsg){
   });
 }
 
+// 2026-09-28 新增：「新增獎項後，只要重新整理視窗，獎項就會消失」的第二道
+// 防線（第一道是 firebase-init.js 開啟的離線持久化，見該檔案的說明）——
+// 寫入送出去、還沒得到 Firestore 伺服器確認完成（ui.saving 為 true）的這段
+// 期間，如果使用者想整頁重新整理或關閉分頁，瀏覽器會跳出原生的「確定要
+// 離開這個頁面嗎？」提示，擋一下、讓使用者有機會取消，等存檔真的完成
+// （ui.saving 變回 false）再離開，而不是在寫入還沒確定送達前就整頁重來。
+// 大多數瀏覽器基於安全考量不會顯示自訂文字，returnValue 只是相容寫法。
+window.addEventListener('beforeunload', function(e){
+  if (!ui.saving) return;
+  e.preventDefault();
+  e.returnValue = '資料還在儲存中，確定要離開嗎？剛剛的變更可能會遺失。';
+  return e.returnValue;
+});
+
 /* ============================================================
    Record CRUD
    ============================================================ */
@@ -1711,6 +1725,19 @@ function renderShell(){
         adminHtml +
       '</div>' +
     '</div>' +
+    // 2026-09-28 新增：上次存檔失敗時的常駐提醒（跟 showToast 那種幾秒後
+    // 自動消失的提示不同，這裡會一直顯示到下一次存檔成功為止）——原本存檔
+    // 失敗只有一個 4 秒左右的 toast，稍微沒注意到就會錯過，畫面上看起來
+    // 還是「已經存好」的樣子（因為 STATE 本身已經改了，只是還沒真正寫進
+    // Firestore），使用者很容易誤以為存檔成功，直到重新整理頁面才發現
+    // 資料不見了。ui.syncOK 只有 saveAndPublish() 的 then／catch 會設定，
+    // 初始值 null（還沒存過檔）不顯示這個提醒。
+    (ui.syncOK === false
+      ? '<div class="banner banner-warn" style="margin:0;border-radius:0;justify-content:center">' +
+          '尚有變更未能成功存到伺服器，重新整理頁面前的內容可能會遺失，請檢查網路連線。' +
+          '<button type="button" class="btn btn-sm" style="margin-left:10px" data-action="retry-sync">重試</button>' +
+        '</div>'
+      : '') +
     '<div class="page-header"><div class="page-header-inner">' +
       '<div><h1>' + esc(viewTitle()) + '</h1><div class="sub">' + esc(viewSub()) + '</div></div>' +
     '</div></div>' +
@@ -2384,6 +2411,7 @@ function awardBlockHTML(award, recSeq){
             '<option value="school"' + (type==='school'?' selected':'') + '>學校</option>' +
             '<option value="teacher"' + (type==='teacher'?' selected':'') + '>教師</option>' +
           '</select></div>' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-action="duplicate-award-block" title="新增一個項目／類型都跟這個一樣的獎項區塊，獎項名稱與得獎人留空——方便連續輸入同一場比賽底下好幾個同類型的獎項（例如冠軍／亞軍／季軍都是「個人」類型），不用每次都重新選一次類型">複製獎項</button>' +
         '<button type="button" class="rm-award-btn" data-action="remove-award-block" title="移除整個獎項">刪除獎項</button>' +
       '</div>' +
       '<div class="award-block-body">' +
@@ -4086,6 +4114,14 @@ root.addEventListener('click', function(e){
     adminLogout();
     return;
   }
+  if (action === 'retry-sync'){
+    // saveAndPublish() 每次都是拿「現在的 STATE」跟 firestoreMirror 重新
+    // 比對差異——上次存檔失敗時 firestoreMirror 沒有被更新（見該函式的
+    // catch 分支），所以這裡直接再呼叫一次，會自動抓出還沒真正寫進去的
+    // 那部分差異重試，不需要另外記錄「上次失敗的是什麼」。
+    saveAndPublish('已重新同步');
+    return;
+  }
   if (action === 'google-logout'){
     // 登出 Google 帳號（不是上面的管理員密碼登出）——登出後會被
     // fbApi.onAuthChange() 導回登入畫面，STATE 也會清空。
@@ -4098,6 +4134,29 @@ root.addEventListener('click', function(e){
   }
   if (action === 'remove-award-block'){
     btn.closest('.award-block').remove();
+    return;
+  }
+  if (action === 'duplicate-award-block'){
+    // 2026-09-28 新增（回應「新增複製獎項功能，以便老師可以輸入相同類型的
+    // 獎項」）：複製「項目」「類型」這兩個欄位，其餘（獎項名稱、得獎人）
+    // 一律留白——同一場比賽常常一口氣有好幾個同類型的獎項（例如個人賽的
+    // 冠軍／亞軍／季軍），複製後只要接著打獎項名稱、挑得獎人就好，不用
+    // 每次都重新選一次「類型」下拉選單。讀的是目前表單上「即時」的值
+    // （不是原本建立這個區塊時的初始值），所以就算使用者在複製前已經把
+    // 類型／項目改過，複製出來的也是改過之後的最新設定。
+    var dupBlock = btn.closest('.award-block');
+    var dupItemEl = dupBlock.querySelector('.award-item');
+    var dupTypeEl = dupBlock.querySelector('.award-type');
+    var dupAward = {
+      item: dupItemEl ? dupItemEl.value.trim() : '',
+      type: dupTypeEl ? dupTypeEl.value : 'individual',
+      name: '',
+      recipients: [{ class:'', no:'', name:'' }]
+    };
+    dupBlock.insertAdjacentHTML('afterend', awardBlockHTML(dupAward));
+    var newBlock = dupBlock.nextElementSibling;
+    var newNameInput = newBlock ? newBlock.querySelector('.award-name') : null;
+    if (newNameInput) newNameInput.focus();
     return;
   }
   if (action === 'add-recipient-row'){

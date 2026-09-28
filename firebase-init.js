@@ -21,6 +21,26 @@
   var auth = firebase.auth();
   var db = firebase.firestore();
 
+  // 2026-09-28 新增：開啟離線持久化（把 Firestore 的本地快取寫進瀏覽器的
+  // IndexedDB，而不是只放在分頁的記憶體裡）。這是修「新增獎項後，只要重新
+  // 整理視窗，獎項就會消失」這個回報的關鍵一步——沒有開這個功能時，
+  // commitDiff() 送出的寫入在真正送達 Firestore 伺服器之前，只暫存在這個
+  // 分頁的記憶體裡；如果使用者在寫入還沒送達伺服器前就整頁重新整理（例如
+  // 網路一時不穩、或存檔按下去後沒等提示訊息就手滑重新整理），那筆還沒送達
+  // 的寫入會隨著分頁重新整理直接消失，畫面上「看起來已經存好」的資料其實
+  // 從來沒有真正寫進 Firestore。開啟這個功能後，寫入會先穩定地存進瀏覽器
+  // 本機的 IndexedDB，即使剛存檔就整頁重新整理，回來時 Firestore SDK 還是
+  // 會自動接著把這筆寫入送出去，不會憑空消失。
+  //
+  // enablePersistence() 在少數情況會失敗（不算致命錯誤，只是退回沒有本機
+  // 持久化的行為，跟開這個功能之前一樣）：同一個瀏覽器同時開了多個分頁
+  // （failed-precondition，持久化只能有一個分頁在用）、或瀏覽器本身不支援
+  // （unimplemented，例如某些無痕模式）。這裡都只是記一筆 console 訊息，
+  // 不影響其他功能繼續運作。
+  db.enablePersistence({ synchronizeTabs: true }).catch(function(err){
+    console.warn('[firebase-init] 無法開啟離線持久化（' + (err && err.code) + '），將以無本機快取的方式運作：', err);
+  });
+
   var provider = new firebase.auth.GoogleAuthProvider();
   // hd 只是「登入視窗預設鎖定這個網域的帳號」的體驗優化，真正的防護在下面
   // isAllowedEmail() 這一關，以及 Firestore 規則裡對 email 網域的檢查。
