@@ -182,8 +182,14 @@
   }
   .rm-btn{ width:34px; height:34px; border-radius:var(--radius-s); border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-muted); cursor:pointer; flex:0 0 34px; }
   .rm-btn:hover{ color:var(--color-bad); border-color:var(--color-bad); }
-  .rm-award-btn{ background:transparent; border:1px solid var(--color-border); border-radius:var(--radius-s); color:var(--color-text-muted); padding:8px 10px; cursor:pointer; }
+  /* 「複製獎項」與「刪除獎項」共用同一套基本樣式（大小、邊框、留白），只有
+     滑鼠移過去（hover）時的顏色不同：複製用主題藍、刪除用警示紅，讓兩顆
+     按鈕看起來是「同一組」但功能各自清楚。2026-09-28：.rm-award-btn 原本
+     自己包辦全部樣式，現在拆成共用的 .award-block-action-btn + 各自的
+     hover 顏色，並新增 .dup-award-btn 給「複製獎項」使用。 */
+  .award-block-action-btn{ background:transparent; border:1px solid var(--color-border); border-radius:var(--radius-s); color:var(--color-text-muted); padding:8px 10px; cursor:pointer; font:inherit; }
   .rm-award-btn:hover{ color:var(--color-bad); border-color:var(--color-bad); }
+  .dup-award-btn:hover{ color:var(--color-accent); border-color:var(--color-accent); }
 
   /* ---------- table ---------- */
   .subject-section{ margin-bottom:26px; }

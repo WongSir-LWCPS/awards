@@ -313,6 +313,18 @@ function setView(v){
   if (VALID_VIEWS[v]) safeSessionSet('awardsView', v);
 }
 
+// 2026-09-28 新增：目前選擇的學年，同樣存進 sessionStorage（跟 awardsView／
+// awardsAdminMode 一樣），讓它撐得過手動重新整理視窗（F5）。沒有這個之前，
+// 老師如果正在查看一個還沒被設成「目前學年」的學年（例如剛用「新增學年」加
+// 進去、但還沒按「設定為目前學年」的 2026-2027），一旦重新整理視窗，畫面的
+// 學年篩選會悄悄跳回真正的「目前學年」——剛新增的活動記錄其實安全地存在
+// Firestore 裡，只是被篩選條件擋住沒顯示出來，看起來就像「資料不見了」。
+function setSelectedYear(y){
+  ui.selectedYear = y;
+  if (y) safeSessionSet('awardsSelectedYear', y);
+  else safeSessionRemove('awardsSelectedYear');
+}
+
 /* ============================================================
    State load + defensive migration
    ------------------------------------------------------------
@@ -1140,7 +1152,7 @@ function finalizeRecordSave(subject, event_, organizer, date, teacher, schoolYea
   var wasEditing = !!ui.editingId;
   ui.editingId = null;
   setView('list');
-  ui.selectedYear = schoolYear;
+  setSelectedYear(schoolYear);
   ui.expandedId = record.id;
   saveAndPublish(wasEditing ? '已更新記錄' : '已新增記錄');
 }
@@ -1187,7 +1199,7 @@ function clearYearData(year){
   var rosterCount = STATE.studentRosters.filter(function(r){ return r.schoolYear === year; }).length;
   STATE.records = STATE.records.filter(function(r){ return r.schoolYear !== year; });
   STATE.studentRosters = STATE.studentRosters.filter(function(r){ return r.schoolYear !== year; });
-  if (ui.selectedYear === year) ui.selectedYear = STATE.meta.currentSchoolYear;
+  if (ui.selectedYear === year) setSelectedYear(STATE.meta.currentSchoolYear);
   ui.expandedId = null;
   ui.deleteConfirmId = null;
   ui.modal = null;
@@ -2411,8 +2423,8 @@ function awardBlockHTML(award, recSeq){
             '<option value="school"' + (type==='school'?' selected':'') + '>學校</option>' +
             '<option value="teacher"' + (type==='teacher'?' selected':'') + '>教師</option>' +
           '</select></div>' +
-        '<button type="button" class="btn btn-sm btn-ghost" data-action="duplicate-award-block" title="新增一個項目／類型都跟這個一樣的獎項區塊，獎項名稱與得獎人留空——方便連續輸入同一場比賽底下好幾個同類型的獎項（例如冠軍／亞軍／季軍都是「個人」類型），不用每次都重新選一次類型">複製獎項</button>' +
-        '<button type="button" class="rm-award-btn" data-action="remove-award-block" title="移除整個獎項">刪除獎項</button>' +
+        '<button type="button" class="award-block-action-btn dup-award-btn" data-action="duplicate-award-block" title="複製整個獎項區塊（項目、獎項名稱、類型、所有得獎人）成一份新的，方便在原本的基礎上修改">複製獎項</button>' +
+        '<button type="button" class="award-block-action-btn rm-award-btn" data-action="remove-award-block" title="移除整個獎項">刪除獎項</button>' +
       '</div>' +
       '<div class="award-block-body">' +
         '<div class="recipients-col">' +
@@ -4137,21 +4149,42 @@ root.addEventListener('click', function(e){
     return;
   }
   if (action === 'duplicate-award-block'){
-    // 2026-09-28 新增（回應「新增複製獎項功能，以便老師可以輸入相同類型的
-    // 獎項」）：複製「項目」「類型」這兩個欄位，其餘（獎項名稱、得獎人）
-    // 一律留白——同一場比賽常常一口氣有好幾個同類型的獎項（例如個人賽的
-    // 冠軍／亞軍／季軍），複製後只要接著打獎項名稱、挑得獎人就好，不用
-    // 每次都重新選一次「類型」下拉選單。讀的是目前表單上「即時」的值
-    // （不是原本建立這個區塊時的初始值），所以就算使用者在複製前已經把
-    // 類型／項目改過，複製出來的也是改過之後的最新設定。
+    // 2026-09-28 修改（回應「複製獎項應該將該區塊的所有資料複製」）：一開始
+    // 只複製「項目」「類型」、得獎人留白，後來使用者反映應該連獎項名稱、
+    // 全部得獎人（學生的班別/學號/姓名，或教師的姓名）都一併複製過去——
+    // 同一場比賽常常有好幾個內容很接近的獎項（例如同一批得獎人、換一個
+    // 項目名稱），複製整份之後在原本的基礎上小改會比每次重新輸入快很多。
+    // 讀的是目前表單上「即時」的值（不是原本建立這個區塊時的初始值），
+    // 所以就算使用者在複製前已經把內容改過，複製出來的也是改過之後的
+    // 最新設定。
     var dupBlock = btn.closest('.award-block');
     var dupItemEl = dupBlock.querySelector('.award-item');
+    var dupNameEl = dupBlock.querySelector('.award-name');
     var dupTypeEl = dupBlock.querySelector('.award-type');
+    var dupType = dupTypeEl ? dupTypeEl.value : 'individual';
+    var dupIsTeacher = dupType === 'teacher';
+    var dupRecipients = [];
+    dupBlock.querySelectorAll('.recipient-row').forEach(function(row){
+      if (dupIsTeacher){
+        var selEl = row.querySelector('.rec-name');
+        dupRecipients.push({ class:'', no:'', name: selEl ? selEl.value : '' });
+      } else {
+        var clsEl = row.querySelector('.rec-class');
+        var noEl = row.querySelector('.rec-no');
+        var nameEl = row.querySelector('.rec-name');
+        dupRecipients.push({
+          class: clsEl ? clsEl.value : '',
+          no: noEl ? noEl.value : '',
+          name: nameEl ? nameEl.value : ''
+        });
+      }
+    });
+    if (!dupRecipients.length) dupRecipients.push({ class:'', no:'', name:'' });
     var dupAward = {
       item: dupItemEl ? dupItemEl.value.trim() : '',
-      type: dupTypeEl ? dupTypeEl.value : 'individual',
-      name: '',
-      recipients: [{ class:'', no:'', name:'' }]
+      name: dupNameEl ? dupNameEl.value : '',
+      type: dupType,
+      recipients: dupRecipients
     };
     dupBlock.insertAdjacentHTML('afterend', awardBlockHTML(dupAward));
     var newBlock = dupBlock.nextElementSibling;
@@ -4881,7 +4914,7 @@ root.addEventListener('change', function(e){
     return;
   }
   if (e.target && e.target.id === 'year-select'){
-    ui.selectedYear = e.target.value;
+    setSelectedYear(e.target.value);
     ui.expandedId = null;
     render();
     return;
@@ -5027,7 +5060,13 @@ function maybeStartApp(){
   };
   STATE = migrateState(rawState);
   firestoreMirror = stateToMirrorShape(STATE);
-  ui.selectedYear = STATE.meta.currentSchoolYear;
+  // 優先使用重新整理前記得的學年（見 setSelectedYear 上方註解），但要先確認
+  // 那個學年目前仍然存在於學年列表中（避免記住一個已經被刪除的學年），
+  // 不存在／沒記住過，才退回真正的「目前學年」。
+  var rememberedYear = safeSessionGet('awardsSelectedYear');
+  ui.selectedYear = (rememberedYear && STATE.schoolYears.indexOf(rememberedYear) !== -1)
+    ? rememberedYear
+    : STATE.meta.currentSchoolYear;
   render();
 }
 
