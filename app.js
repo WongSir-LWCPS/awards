@@ -941,7 +941,26 @@ function saveAndPublish(successMsg){
   render();
   var nextMirror = stateToMirrorShape(STATE);
   window.fbApi.commitDiff(firestoreMirror, nextMirror).then(function(){
-    firestoreMirror = JSON.parse(JSON.stringify(nextMirror));
+    // 2026-09-28 移除了這裡原本的 `firestoreMirror = JSON.parse(JSON.
+    // stringify(nextMirror));`（回應「新增/匯入獎項後記錄仍然會消失」持續
+    // 回報，這是第三道、也是目前判斷最直接命中的修正）。原因：`nextMirror`
+    // 是「呼叫 saveAndPublish 當下那一刻」的快照，跟真正的 Firestore 伺服器
+    // 狀態不是同一份東西——commitDiff() 的 Promise resolve 只代表這次批次
+    // 寫入成功送達，不代表這段期間沒有任何其他來源（即時同步監聽器收到
+    // 別人／別的分頁的變動、甚至只是同一份資料的回音）也在同時改動共用的
+    // `firestoreMirror` 這個變數。原本的寫法會用這份「可能已經過時」的
+    // `nextMirror` 直接覆蓋掉 `firestoreMirror`，如果剛好有其他更新的資料
+    // 在這中間被 mergeCollection／mergeSettings 正確寫入過 `firestoreMirror`，
+    // 這裡會把它蓋回舊版——下一次任何人（含自己）再呼叫 saveAndPublish()，
+    // diffArrayById() 比對到「firestoreMirror 以為存在、但目前 STATE 已經
+    // 不存在」的記錄（其實只是 STATE 尚未來得及被之後那組更新的快照回填），
+    // 就會被誤判成「使用者刪除了它」，送出一個沒有人真正要求的 delete 操作
+    // ——這正是最符合「明明存檔顯示成功、卻在不特定的之後某次操作時悄悄
+    // 消失」這個症狀的機制。修正後 `firestoreMirror` 只由 mergeCollection／
+    // mergeSettings（見檔案最後 Firebase bootstrap 段落）根據即時同步監聽器
+    // 實際收到的 Firestore 資料更新——那才是唯一真正該被信任的「目前
+    // Firestore 上真正有什麼」的來源，而且這次寫入本身很快就會觸發監聽器
+    // 收到回音、自然把 firestoreMirror 更新好，不需要這裡搶著手動覆蓋。
     ui.saving = false;
     ui.syncOK = true;
     showToast(successMsg || '已儲存');
@@ -5073,6 +5092,21 @@ function maybeStartApp(){
 // 之後每次某個集合有變動（不論是自己存檔、還是別人存檔同步回來的），走這裡輕量
 // 更新 STATE 對應的欄位即可，不重跑 migrateState()（原因見該函式上方註解）。
 function mergeCollection(key, arr){
+  // 2026-09-28 新增的診斷紀錄（回應「新增/匯入獎項後記錄仍然會消失」持續
+  // 回報）：這次修正了兩個判斷最可能的根因（見 saveAndPublish 與 Firebase
+  // bootstrap 段落的說明），但因為這個沙盒環境連不到真正的 Firestore
+  // 伺服器、無法實地驗證，先加上這段 console.log，讓管理員或老師如果
+  // 又遇到同樣狀況，可以打開瀏覽器開發者工具（F12）→ Console，看到每次
+  // 「records」集合真正從 Firestore 收到的筆數變化，把訊息截圖回報，
+  // 之後才能更快定位到底是哪個環節出的問題，而不用再靠猜測。
+  if (key === 'records' && appStarted && STATE && Array.isArray(STATE.records)){
+    var beforeCount = STATE.records.length, afterCount = arr.length;
+    if (afterCount < beforeCount){
+      console.warn('[awards-sync] records 筆數減少：' + beforeCount + ' → ' + afterCount + '（若非你自己剛刪除記錄，請截圖這則訊息回報）', { before: STATE.records.map(function(r){ return r.id; }), after: arr.map(function(r){ return r.id; }) });
+    } else {
+      console.log('[awards-sync] records 已同步，筆數：' + beforeCount + ' → ' + afterCount);
+    }
+  }
   pendingData[key] = arr;
   loadedFlags[key] = true;
   if (!appStarted){ maybeStartApp(); return; }
@@ -5118,6 +5152,24 @@ if (!window.fbApi){
       renderLoginGate();
       return;
     }
+    // 2026-09-28 修正（回應「新增/匯入獎項後記錄仍然會消失」持續回報）：
+    // Firebase 的 onAuthStateChanged 不保證只在「真正登入/登出」時才觸發——
+    // 背景 token 自動更新（ID token 預設每小時左右會自動換發一次）、分頁
+    // 重新取得焦點、網路重新連線等情況，都可能讓它帶著「同一位」使用者
+    // 再次觸發一次。原本的程式碼每次收到非空的 user 都無條件重新呼叫
+    // startListening() 建立一整組全新的 onSnapshot 監聽器，卻沒有先關掉
+    // 舊的（也沒有檢查是不是同一位使用者）——舊的四個監聽器並不會消失，
+    // 會一直疊加下去。這代表：(1) 同一筆資料異動之後可能被好幾組獨立的
+    // 監聽器各自回呼一次 mergeCollection／mergeSettings，(2) 每一組監聽器
+    // 各自有獨立的本地快取／網路狀態，疊加多組之後，在分頁背景很久、網路
+    // 一度斷線重連等情況下，較舊的一組理論上可能短暫回報跟最新狀態不一致
+    // 的快照、覆蓋掉 STATE——這很可能是「儲存明明成功、畫面上卻不定時
+    // 恢復成新增前的舊資料，看起來像剛新增的獎項憑空消失」的根本原因之一。
+    // 修正：先確認「是不是同一位使用者、而且監聽器目前確實還在運作中」，
+    // 是的話直接略過，不重新訂閱；只有真正換了使用者、或這是第一次登入，
+    // 才關掉舊監聽器（若有）並重新建立一組新的。
+    if (stopListening && currentUserEmail === (user.email || '')) return;
+    if (stopListening){ stopListening(); stopListening = null; }
     currentUserEmail = user.email || '';
     renderLoadingGate('載入資料中…');
     stopListening = window.fbApi.startListening({
