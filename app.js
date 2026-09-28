@@ -917,17 +917,45 @@ function buildFullHTML(state){
 
 var firestoreMirror = null; // {records, studentRosters, clubRosters, settings} — 見 bootstrap 段落
 
+// 2026-09-28 修正（找到「新增/匯入獎項後記錄仍然會消失」真正的根因）：
+// 原本這裡是 `records: s.records`（單純把陣列參照原封不動放進回傳物件，
+// 不是複製一份新的），studentRosters／clubRosters／settings 裡的
+// schoolYears／subjects／teachers 也是同樣的寫法。這代表 `firestoreMirror`
+// 跟 `STATE` 其實共用「同一個」陣列物件，不是各自獨立的兩份快照——
+// `firestoreMirror = stateToMirrorShape(STATE)`（在 mergeCollection／
+// mergeSettings／maybeStartApp 這幾個地方）執行過一次之後，
+// `firestoreMirror.records` 跟 `STATE.records` 就是同一個陣列參照；之後
+// 任何 `STATE.records.push(...)`（新增記錄）都會「同時」也改到
+// `firestoreMirror.records`，因為根本是同一份東西。於是 saveAndPublish()
+// 呼叫 `nextMirror = stateToMirrorShape(STATE)` 拿到的，跟 `firestoreMirror`
+// 永遠是同一個陣列——diffArrayById(firestoreMirror.records,
+// nextMirror.records) 等於拿一份資料跟它自己比較，當然永遠找不到任何差異，
+// `commitDiff` 因此永遠算出 0 個操作（也就是使用者這次截圖看到的「這次
+// 沒有任何欄位變動，不需要寫入 Firestore（noop）」）——新增/編輯/刪除
+// 記錄從來沒有真正被送到 Firestore 過，只是活在瀏覽器目前這份 STATE 的
+// 記憶體裡，畫面上因此看起來「明明存好了」，一旦重新整理視窗、STATE 重新
+// 從 Firestore 真正的資料建立，這些從未真正寫入的變更自然就「消失」了。
+// 這正是本次問題從最初被回報以來、一路排除其他假設（學年篩選、重複監聽器、
+// 離線持久化…）之後，真正被抓到的根本原因；前面幾輪的修正雖然本身也是
+// 真實存在、值得修的小問題，但都不是這次症狀的主因，此檔案不再重複移除。
+// 修正做法：把 records／studentRosters／clubRosters 都用 JSON 深拷貝
+// （這幾份資料本身就是要拿去序列化寫進 Firestore 的純資料，用
+// JSON.parse(JSON.stringify(...)) 深拷貝完全足夠、也最簡單直接），
+// settings 底下的三個陣列也一併用 `.slice()` 淺拷貝成新陣列（內容是
+// 字串，淺拷貝就足夠切斷參照）。這樣 `firestoreMirror` 才會是真正獨立、
+// 「這次呼叫當下」的快照，之後 STATE 不管怎麼變動都不會回頭影響到它，
+// diffArrayById 才能正確比較出「這次真正新增/修改/刪除了什麼」。
 function stateToMirrorShape(s){
   return {
-    records: s.records,
-    studentRosters: s.studentRosters,
-    clubRosters: s.clubRosters,
+    records: JSON.parse(JSON.stringify(s.records)),
+    studentRosters: JSON.parse(JSON.stringify(s.studentRosters)),
+    clubRosters: JSON.parse(JSON.stringify(s.clubRosters)),
     settings: {
       schoolName: s.meta.schoolName,
       currentSchoolYear: s.meta.currentSchoolYear,
-      schoolYears: s.schoolYears,
-      subjects: s.subjects,
-      teachers: s.teachers
+      schoolYears: s.schoolYears.slice(),
+      subjects: s.subjects.slice(),
+      teachers: s.teachers.slice()
     }
   };
 }
