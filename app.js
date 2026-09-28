@@ -2406,8 +2406,12 @@ function renderAddView(){
   // 批次匯入活動記錄的入口特意放在「新增記錄」頁面（而不是「獲獎記錄」列表頁）——
   // 這裡本來就是使用者「要新增活動記錄」時會來的地方，批次匯入是另一種新增方式
   // （一次建立多筆全新記錄），只在「新增」情境（rec 為空，不是在編輯既有記錄）
-  // 且管理員登入時顯示；編輯既有記錄時沒有意義，不顯示。
-  var bulkImportBlock = (!rec && ui.adminMode) ?
+  // 顯示；編輯既有記錄時沒有意義，不顯示。2026-09-28 起不再要求管理員登入才能
+  // 使用——跟單筆新增記錄一樣，任何登入了系統的老師都可以直接批次匯入，不需要
+  // 額外輸入管理員密碼（管理員密碼只用來保護學生名單／課外活動名單／設定等
+  // 「設定頁」相關功能，批次匯入本質上跟手動填表單新增記錄是同一件事，不屬於
+  // 這個範疇）。
+  var bulkImportBlock = (!rec) ?
     '<div class="card card-pad stack">' +
       '<div class="row wrap" style="align-items:center;justify-content:space-between;gap:10px">' +
         '<div>' +
