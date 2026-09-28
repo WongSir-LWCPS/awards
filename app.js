@@ -861,14 +861,28 @@ function studentHistory(identity){
    Toast
    ============================================================ */
 
-function showToast(msg, timeout){
+// 2026-09-28 修改（回應「新增一個功能，如果有任何資料變更時都彈出提示信息」）：
+// 全部 29 處資料異動（新增/編輯/刪除記錄、批次匯入、學生/教師/課外活動名單、
+// 學年/科目設定等）本來就已經各自呼叫 saveAndPublish(successMsg) 帶著明確的
+// 完成訊息，而且這個提示是在 commitDiff() 真正跟 Firestore 確認寫入成功之後
+// 才會跳出來（不是使用者一按下按鈕就樂觀顯示），所以「資料真的變更完成才
+// 提示」這件事原本就是對的、不需要另外新增一個機制。這次改的是讓這個提示
+// 更醒目、更不容易被忽略——加上 type 參數區分「成功」（打勾圖示、綠色）跟
+// 「失敗」（警示圖示、紅色），不再跟一般驗證訊息（例如「請輸入學生姓名」）
+// 共用同一種不特別顯眼的藍色，看一眼顏色跟圖示就能立刻分辨這次操作到底是
+// 真的存好了、還是失敗了，不用細讀文字內容。也把預設停留時間從 3.2 秒
+// 延長，成功/失敗類的提示會停留更久，比較不會在還沒看清楚內容前就消失。
+function showToast(msg, timeout, type){
   var wrap = document.getElementById('toast-wrap');
   if (!wrap) return;
   var el = document.createElement('div');
-  el.className = 'toast';
-  el.textContent = msg;
+  el.className = 'toast' + (type ? ' toast-' + type : '');
+  var icon = type === 'success' ? '✓' : (type === 'error' ? '!' : '');
+  el.innerHTML = (icon ? '<span class="toast-icon">' + icon + '</span>' : '') + '<span class="toast-msg"></span>';
+  el.querySelector('.toast-msg').textContent = msg;
   wrap.appendChild(el);
-  setTimeout(function(){ el.remove(); }, timeout || 3200);
+  var defaultTimeout = type === 'success' || type === 'error' ? 4800 : 3200;
+  setTimeout(function(){ el.remove(); }, timeout || defaultTimeout);
 }
 
 /* ============================================================
@@ -967,7 +981,7 @@ function saveAndPublish(successMsg){
   console.log('[awards-sync] saveAndPublish 被呼叫：' + (successMsg || '') + '，目前 STATE.records 共 ' + (STATE && STATE.records ? STATE.records.length : '?') + ' 筆');
   if (!window.fbApi || !firestoreMirror){
     console.warn('[awards-sync] saveAndPublish 提早返回，沒有嘗試寫入 Firestore！window.fbApi 是否存在：' + !!window.fbApi + '，firestoreMirror 是否存在：' + !!firestoreMirror);
-    showToast('尚未連接資料庫，變更暫時只存在此頁面（重新整理會遺失）', 4200);
+    showToast('尚未連接資料庫，變更暫時只存在此頁面（重新整理會遺失）', 5200, 'error');
     return;
   }
   ui.saving = true;
@@ -997,7 +1011,7 @@ function saveAndPublish(successMsg){
     console.log('[awards-sync] saveAndPublish 成功：commitDiff 已 resolve');
     ui.saving = false;
     ui.syncOK = true;
-    showToast(successMsg || '已儲存');
+    showToast((successMsg || '已儲存') + '（已確認存入資料庫）', 4800, 'success');
     render();
   }).catch(function(err){
     console.error('[awards-sync] saveAndPublish 失敗：commitDiff 被 reject，code=' + (err && err.code) + ' message=' + (err && err.message), err);
@@ -1005,9 +1019,9 @@ function saveAndPublish(successMsg){
     ui.syncOK = false;
     var code = err && err.code;
     if (code === 'permission-denied'){
-      showToast('沒有權限完成這個操作（可能是管理員登入已失效，請重新輸入密碼再試一次）', 4200);
+      showToast('沒有權限完成這個操作（可能是管理員登入已失效，請重新輸入密碼再試一次）', 5200, 'error');
     } else {
-      showToast('儲存失敗：' + (err && err.message ? err.message : '未知錯誤') + '，請檢查網路連線後重試', 4200);
+      showToast('儲存失敗：' + (err && err.message ? err.message : '未知錯誤') + '，請檢查網路連線後重試', 5200, 'error');
     }
     render();
   });
@@ -5214,7 +5228,7 @@ if (!window.fbApi){
       settings: function(obj){ mergeSettings(obj); },
       error: function(err){
         console.error('[firebase] 同步失敗', err);
-        showToast('資料同步發生問題：' + (err && err.message ? err.message : '未知錯誤'), 4200);
+        showToast('資料同步發生問題：' + (err && err.message ? err.message : '未知錯誤'), 5200, 'error');
       }
     });
   });
